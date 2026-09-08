@@ -13,6 +13,7 @@ from .routes_shares import router as shares_router
 from .routes_guest import router as guest_router
 from .routes_grants import router as grants_router
 from .routes_upload import router as upload_router
+from .routes_delete import router as delete_router
 
 
 @asynccontextmanager
@@ -51,6 +52,7 @@ app.include_router(shares_router)
 app.include_router(guest_router)
 app.include_router(grants_router)
 app.include_router(upload_router)
+app.include_router(delete_router)
 
 
 @app.get("/health")
