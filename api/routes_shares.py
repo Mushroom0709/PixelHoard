@@ -86,3 +86,103 @@ async def get_share(
     if share.owner_id != user.id and not user.is_admin:
         raise HTTPException(status_code=403, detail="no access to this share")
     return ShareOut.model_validate(share)
+
+
+# ── Token CRUD(ticket #10) ─────────────────────────────
+from .models import ShareToken  # noqa: E402
+from .schemas import ShareTokenCreate, ShareTokenOut  # noqa: E402
+from datetime import datetime as _dt, timezone as _tz  # noqa: E402
+from fastapi import Response  # noqa: E402
+
+
+async def _resolve_share_or_404(slug: str, user: UserModel, db: AsyncSession) -> Share:
+    """取 share 并校验 owner(供 token CRUD 用)。"""
+    stmt = select(Share).where(Share.slug == slug).where(Share.is_deleted == False)  # noqa: E712
+    result = await db.execute(stmt)
+    share = result.scalar_one_or_none()
+    if share is None:
+        raise HTTPException(status_code=404, detail="share not found")
+    if share.owner_id != user.id and not user.is_admin:
+        raise HTTPException(status_code=403, detail="not owner")
+    return share
+
+
+@router.post("/{slug}/tokens", response_model=ShareTokenOut, status_code=201)
+async def create_token(
+    slug: str,
+    body: ShareTokenCreate,
+    user: UserModel = Depends(require_user),
+    db: AsyncSession = Depends(get_session),
+) -> ShareTokenOut:
+    """owner 给 share 生成一个访问 token。"""
+    share = await _resolve_share_or_404(slug, user, db)
+
+    # 生成短码:8 位 base62
+    token_code = random_slug(8)
+
+    expires_at = body.expires_at
+    if expires_at and expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=_tz.utc)
+
+    token = ShareToken(
+        share_id=share.id,
+        token_code=token_code,
+        permission=body.permission,
+        label=body.label,
+        public_note=body.public_note,
+        expires_at=expires_at,
+    )
+    db.add(token)
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        # 极小概率碰撞,重试一次
+        token_code = random_slug(8)
+        token.token_code = token_code
+        await db.commit()
+    await db.refresh(token)
+    return ShareTokenOut.model_validate(token)
+
+
+@router.get("/{slug}/tokens", response_model=list[ShareTokenOut])
+async def list_tokens(
+    slug: str,
+    user: UserModel = Depends(require_user),
+    db: AsyncSession = Depends(get_session),
+) -> list[ShareTokenOut]:
+    """owner 列出 share 的所有 token(含已撤销)。"""
+    share = await _resolve_share_or_404(slug, user, db)
+
+    stmt = (
+        select(ShareToken)
+        .where(ShareToken.share_id == share.id)
+        .order_by(ShareToken.created_at.desc())
+    )
+    result = await db.execute(stmt)
+    tokens = result.scalars().all()
+    return [ShareTokenOut.model_validate(t) for t in tokens]
+
+
+@router.delete("/{slug}/tokens/{token_id}", status_code=204, response_class=Response)
+async def revoke_token(
+    slug: str,
+    token_id: int,
+    user: UserModel = Depends(require_user),
+    db: AsyncSession = Depends(get_session),
+) -> Response:
+    """owner 撤销 token(revoked_at = now)。"""
+    share = await _resolve_share_or_404(slug, user, db)
+
+    stmt = select(ShareToken).where(
+        ShareToken.id == token_id,
+        ShareToken.share_id == share.id,
+    )
+    result = await db.execute(stmt)
+    token = result.scalar_one_or_none()
+    if token is None:
+        raise HTTPException(status_code=404, detail="token not found")
+    if token.revoked_at is None:
+        token.revoked_at = _dt.now(_tz.utc)
+        await db.commit()
+    return Response(status_code=204)
