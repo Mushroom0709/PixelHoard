@@ -12,6 +12,7 @@ from .routes_auth import router as auth_router
 from .routes_shares import router as shares_router
 from .routes_guest import router as guest_router
 from .routes_grants import router as grants_router
+from .routes_upload import router as upload_router
 
 
 @asynccontextmanager
@@ -49,6 +50,7 @@ app.include_router(auth_router)
 app.include_router(shares_router)
 app.include_router(guest_router)
 app.include_router(grants_router)
+app.include_router(upload_router)
 
 
 @app.get("/health")
