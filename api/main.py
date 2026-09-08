@@ -10,6 +10,7 @@ from .obs_client import obs
 from .db import engine
 from .routes_auth import router as auth_router
 from .routes_shares import router as shares_router
+from .routes_guest import router as guest_router
 
 
 @asynccontextmanager
@@ -45,6 +46,7 @@ app.add_middleware(
 # 路由
 app.include_router(auth_router)
 app.include_router(shares_router)
+app.include_router(guest_router)
 
 
 @app.get("/health")
