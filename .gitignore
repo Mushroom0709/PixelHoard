@@ -1,3 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
 
-# 本地工作目录(skill 副产物,不入版本)
+# Node / Vite / React
+node_modules/
+dist/
+.vite/
+*.local
+
+# IDE / OS
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 本地工作目录(skill 副产物)
 .scratch/
+
+# 部署副产物
+logs/
+*.log
+.env
+.env.local
+
+# Docker
+docker-compose.override.yml
+
+# 测试
+.coverage
+htmlcov/
