@@ -5,9 +5,10 @@ from typing import AsyncIterator
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from config import settings
-from obs_client import obs
-from db import engine
+from .config import settings
+from .obs_client import obs
+from .db import engine
+from .routes_auth import router as auth_router
 
 
 @asynccontextmanager
@@ -39,6 +40,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# 路由
+app.include_router(auth_router)
 
 
 @app.get("/health")
