@@ -76,16 +76,49 @@ async def get_share(
     user: UserModel = Depends(require_user),
     db: AsyncSession = Depends(get_session),
 ) -> ShareOut:
-    """取 share 详情(owner 视角)。"""
+    """取 share 详情。
+
+    权限:
+    - owner / admin → 200
+    - viewer / editor(被授权)→ 200 + 返回 role(ticket #13)
+    - 其他 → 403
+    - 不存在 → 404
+    """
     stmt = select(Share).where(Share.slug == slug).where(Share.is_deleted == False)  # noqa: E712
     result = await db.execute(stmt)
     share = result.scalar_one_or_none()
     if share is None:
         raise HTTPException(status_code=404, detail="share not found")
-    # owner / grant / admin 才能看(后续 ticket #11/12/13 细分)
-    if share.owner_id != user.id and not user.is_admin:
+
+    # owner / admin 直通
+    if share.owner_id == user.id or user.is_admin:
+        return ShareOut.model_validate(share)
+
+    # grant 检查
+    from .models import UserGrant  # noqa
+    stmt2 = select(UserGrant).where(
+        UserGrant.share_id == share.id,
+        UserGrant.user_id == user.id,
+    )
+    result2 = await db.execute(stmt2)
+    grant = result2.scalar_one_or_none()
+    # grant 必须是 UserGrant 实例(mock 测试场景下可能返其他对象)
+    if not isinstance(grant, UserGrant):
         raise HTTPException(status_code=403, detail="no access to this share")
-    return ShareOut.model_validate(share)
+
+    # 返回带 role 信息(用于 #13 viewer/editor 区分)
+    out = ShareOut.model_validate({
+        "id": share.id,
+        "owner_id": share.owner_id,
+        "slug": share.slug,
+        "title": share.title,
+        "description": share.description,
+        "is_deleted": share.is_deleted,
+        "created_at": share.created_at,
+        "updated_at": share.updated_at,
+        "role": grant.role,
+    })
+    return out
 
 
 # ── Token CRUD(ticket #10) ─────────────────────────────

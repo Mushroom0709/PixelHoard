@@ -66,6 +66,10 @@ class ShareOut(BaseModel):
     is_deleted: bool = False
     created_at: datetime
     updated_at: datetime
+    # ticket #13: 当前用户的 grant role(viewer/editor/owner/admin)
+    # 仅在 GET /shares/{slug} 返,owner 视角无此字段
+    # role 不是 Share 表字段,owner/admin 调用不要传 role
+    role: Optional[str] = None
 
     @classmethod
     def model_validate(cls, obj, *args, **kwargs):
