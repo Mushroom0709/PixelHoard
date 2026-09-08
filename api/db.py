@@ -1,7 +1,15 @@
-"""数据库 — SQLAlchemy 异步引擎(占位,后续 ticket #4 展开 model)。"""
-from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
+"""数据库 — SQLAlchemy 异步引擎 + ORM Base。"""
+from typing import AsyncIterator
+
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.orm import DeclarativeBase
 
 from config import settings
+
+
+class Base(DeclarativeBase):
+    """ORM 基类(供 models + alembic 引用)。"""
+    pass
 
 
 def _make_url(url: str) -> str:
@@ -16,3 +24,11 @@ engine: AsyncEngine = create_async_engine(
     echo=False,
     pool_pre_ping=True,
 )
+
+async_session = async_sessionmaker(engine, expire_on_commit=False)
+
+
+async def get_session() -> AsyncIterator[AsyncSession]:
+    """FastAPI 依赖 — 异步生成器。"""
+    async with async_session() as s:
+        yield s

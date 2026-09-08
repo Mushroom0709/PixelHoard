@@ -66,6 +66,7 @@ services:
       dockerfile: Dockerfile
     container_name: pixelhoard-worker
     restart: unless-stopped
+    # worker 不需要 alembic(已跑过),只跑 worker 主循环
     command: ["python", "-m", "worker"]
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-pixelhoard}:${POSTGRES_PASSWORD:-pixelhoard-dev-pass}@postgres:5432/${POSTGRES_DB:-pixelhoard}

@@ -19,5 +19,9 @@ COPY . /app
 
 EXPOSE 8000
 
-# 默认启动 api(可被 worker 覆盖 command)
+# 启动时先跑 alembic upgrade head,再起 uvicorn
+# 用 entrypoint.sh 而不是直接 CMD,便于 alembic 失败时容器退出
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+ENTRYPOINT ["/entrypoint.sh"]
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
