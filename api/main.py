@@ -47,6 +47,18 @@ async def health() -> dict:
     return {"ok": True, "service": "pixelhoard-api", "version": "0.0.1"}
 
 
+@app.get("/version")
+async def version() -> dict:
+    """版本 + 构建信息(便于 ticket #2 联调验证)。"""
+    return {
+        "ok": True,
+        "service": "pixelhoard-api",
+        "version": "0.0.1",
+        "phase": "v0.1",
+        "milestone": "ticket #2 — hello linkage",
+    }
+
+
 @app.get("/obs-ping")
 async def obs_ping() -> dict:
     """OBS 连通性探测。"""

@@ -25,13 +25,13 @@ check() {
 }
 
 # 1. web 200
-echo "[1/4] web (/)"
+echo "[1/5] web (/)"
 WEB_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$BASE/")
 check "web HTTP" "200" "$WEB_CODE"
 
 # 2. api /api/health
 echo ""
-echo "[2/4] api (/api/health)"
+echo "[2/5] api (/api/health)"
 HEALTH=$(curl -s "$BASE/api/health")
 echo "  response: $HEALTH"
 if echo "$HEALTH" | grep -q '"ok":true'; then
@@ -44,7 +44,7 @@ fi
 
 # 3. dist hash 一致
 echo ""
-echo "[3/4] dist hash"
+echo "[3/5] dist hash"
 REMOTE_HASH=$(curl -s "$BASE/" | grep -oE 'index-[A-Za-z0-9_-]+\.js' | head -1)
 LOCAL_HASH=$(ls web/dist/assets/index-*.js 2>/dev/null | head -1 | xargs basename)
 echo "  remote: $REMOTE_HASH"
@@ -57,9 +57,22 @@ else
   fail=$((fail+1))
 fi
 
-# 4. api /api/obs-ping(OBS 连通)
+# 4. api /api/version(ticket #2 新增)
 echo ""
-echo "[4/4] obs 连通 (/api/obs-ping)"
+echo "[4/5] api (/api/version)"
+VERSION=$(curl -s "$BASE/api/version")
+echo "  response: $VERSION"
+if echo "$VERSION" | grep -q '"ok":true'; then
+  echo "  ✓ api version ok"
+  pass=$((pass+1))
+else
+  echo "  ✗ api version not ok"
+  fail=$((fail+1))
+fi
+
+# 5. api /api/obs-ping(OBS 连通)
+echo ""
+echo "[5/5] obs 连通 (/api/obs-ping)"
 OBS=$(curl -s "$BASE/api/obs-ping")
 echo "  response: $OBS"
 if echo "$OBS" | grep -q '"ok":true'; then
