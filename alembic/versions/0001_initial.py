@@ -105,7 +105,7 @@ def upgrade() -> None:
         sa.Column("display_key", sa.Text()),
         sa.Column("width", sa.Integer()),
         sa.Column("height", sa.Integer()),
-        sa.Column("duration_seconds", sa.REAL()),
+        sa.Column("duration_seconds", sa.Float()),
         sa.Column("codec", sa.Text()),
         sa.Column("moov_at_head", sa.Boolean()),
         sa.Column("has_exif", sa.Boolean()),

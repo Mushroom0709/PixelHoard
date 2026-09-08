@@ -7,10 +7,10 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     DateTime,
+    Float,
     ForeignKey,
     Index,
     Integer,
-    Real,
     String,
     Text,
     UniqueConstraint,
@@ -165,7 +165,7 @@ class File(Base):
     display_key: Mapped[Optional[str]] = mapped_column(Text)
     width: Mapped[Optional[int]] = mapped_column(Integer)
     height: Mapped[Optional[int]] = mapped_column(Integer)
-    duration_seconds: Mapped[Optional[float]] = mapped_column(Real)
+    duration_seconds: Mapped[Optional[float]] = mapped_column(Float)
     codec: Mapped[Optional[str]] = mapped_column(Text)
     moov_at_head: Mapped[Optional[bool]] = mapped_column(Boolean)
     has_exif: Mapped[Optional[bool]] = mapped_column(Boolean)
