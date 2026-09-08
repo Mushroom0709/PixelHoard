@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import secrets
 from datetime import datetime, timezone
 
@@ -9,14 +10,22 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from .config import settings
 from .db import get_session
 from .models import File, Share, ShareToken, User, UserGrant
-from .schemas import UploadCompleteRequest, UploadCompleteResponse, UploadInitRequest, UploadInitResponse
 from .obs_client import obs, obs_key
+from .redis_client import redis_client
+from .schemas import (
+    UploadCompleteRequest,
+    UploadCompleteResponse,
+    UploadInitRequest,
+    UploadInitResponse,
+)
 
 router = APIRouter(prefix="/s", tags=["upload"])
 
 PART_SIZE = 5 * 1024 * 1024  # 5MB
+UPLOAD_META_TTL = 3600 * 6  # 6h — 比预签名 URL 长
 
 
 async def _resolve_share(slug: str, db: AsyncSession) -> Share:
@@ -104,7 +113,6 @@ async def upload_init(
         raise HTTPException(status_code=413, detail="too many parts")
 
     # OBS initiate multipart
-    from .config import settings
     object_key = obs_key(
         share.id,
         "raw",
@@ -141,8 +149,20 @@ async def upload_init(
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"OBS sign failed: {e}")
 
-    # 把 metadata 暂存(完成时用)— 简化版:不存,完成时再传 sha256/filename
-    # TODO: ticket #16 增强 — 用 Redis 存 upload_id → metadata
+    # 暂存 metadata(完成时用)— Redis 中
+    meta = {
+        "share_id": share.id,
+        "obs_upload_id": obs_upload_id,
+        "obs_key": object_key,
+        "filename": body.filename,
+        "size": body.size,
+        "mime": body.mime_type,
+        "sha256": body.sha256,
+        "suffix": (body.filename.rsplit(".", 1)[-1] if "." in body.filename else "").lower(),
+        "uploaded_by": user.id if user else None,
+        "n_parts": int(n_parts),
+    }
+    redis_client.set(f"upload:{upload_id}", json.dumps(meta), ex=UPLOAD_META_TTL)
 
     return UploadInitResponse(
         upload_id=upload_id,
@@ -158,11 +178,66 @@ async def upload_init(
 async def upload_complete(
     slug: str,
     body: UploadCompleteRequest,
-    user: User | None = Depends(__import__("api.routes_auth", fromlist=["get_current_user"]).get_current_user),
+    user: User | None = Depends(
+        __import__("api.routes_auth", fromlist=["get_current_user"]).get_current_user
+    ),
     db: AsyncSession = Depends(get_session),
 ) -> UploadCompleteResponse:
     """验证所有 part ETag + CompleteMultipart + 写 file row(processing)。
 
-    ticket #16 主要逻辑 — 这里先占位,实际 multipart complete 留给 #16 完善。
+    ticket #16 核心:
+    - 从 Redis 取 upload metadata
+    - 调 OBS completeMultipartUpload(parts 列表)
+    - 写 files row, status='processing'(等 worker 衍生档生成)
+    - 返回 file_id
     """
-    raise HTTPException(status_code=501, detail="ticket #16 implements this")
+    share = await _resolve_share(slug, db)
+
+    meta_raw = redis_client.get(f"upload:{body.upload_id}")
+    if not meta_raw:
+        raise HTTPException(status_code=404, detail="upload not found or expired")
+    meta = json.loads(meta_raw)
+
+    # 校验 share 一致
+    if meta["share_id"] != share.id:
+        raise HTTPException(status_code=400, detail="share mismatch")
+
+    # 调 OBS complete
+    parts = [
+        {"partNumber": p.part_number, "etag": p.etag}
+        for p in body.parts
+    ]
+
+    try:
+        resp = obs.completeMultipartUpload(
+            bucketName=settings.OBS_BUCKET,
+            objectKey=meta["obs_key"],
+            uploadId=meta["obs_upload_id"],
+            parts=parts,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"OBS complete failed: {e}")
+
+    if resp.status >= 300:
+        raise HTTPException(status_code=500, detail=f"OBS complete failed: {resp.errorCode}")
+
+    # 写 file row
+    file_row = File(
+        share_id=share.id,
+        uploaded_by=meta.get("uploaded_by"),
+        original_filename=meta["filename"],
+        obs_key=meta["obs_key"],
+        size_bytes=meta["size"],
+        mime_type=meta["mime"],
+        suffix=meta["suffix"],
+        sha256=meta["sha256"],
+        status="processing",
+    )
+    db.add(file_row)
+    await db.commit()
+    await db.refresh(file_row)
+
+    # 清理 Redis meta
+    redis_client.delete(f"upload:{body.upload_id}")
+
+    return UploadCompleteResponse(file_id=file_row.id, status="processing")
