@@ -1,17 +1,23 @@
-"""认证路由 — ticket #5 (#6 login, #7 logout/refresh 在此基础上加)。"""
+"""认证路由 — ticket #5 (注册) / #6 (登录/me) / #7 (logout/refresh/admin)。"""
 from __future__ import annotations
 
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .db import async_session, get_session
-from .jwt_utils import create_access_token, create_refresh_token, decode_token
+from .jwt_utils import (
+    create_access_token,
+    create_refresh_token,
+    decode_token,
+)
 from .models import User
+from .redis_client import blacklist_token, is_blacklisted
 from .schemas import TokenOut, UserCreate, UserLogin, UserOut
 from .security import hash_password, verify_password
 
@@ -38,6 +44,10 @@ async def get_current_user(
     except Exception:
         return None
     if payload.get("type") != "access":
+        return None
+    # 检查黑名单
+    jti = payload.get("jti")
+    if jti and is_blacklisted(jti):
         return None
     try:
         uid = int(payload["sub"])
@@ -128,3 +138,96 @@ async def login(body: UserLogin, db: AsyncSession = Depends(get_session)) -> Tok
 async def me(user: User = Depends(require_user)) -> UserOut:
     """当前用户。401 if missing/invalid token。"""
     return UserOut.model_validate(user)
+
+
+# ── POST /auth/logout ───────────────────────────────────
+class LogoutOut(BaseModel):
+    ok: bool = True
+
+
+class RefreshIn(BaseModel):
+    refresh_token: str
+
+
+class RefreshOut(BaseModel):
+    access_token: str
+    refresh_token: str
+
+
+@router.post("/logout", response_model=LogoutOut)
+async def logout(
+    authorization: str | None = Header(default=None),
+    user: User | None = Depends(get_current_user),
+) -> LogoutOut:
+    """登出 — 把当前 access token 的 jti 加黑名单。
+
+    客户端应同时丢弃 refresh token(否则通过 /refresh 仍可换 access)。
+    """
+    if not authorization:
+        raise HTTPException(status_code=401, detail="missing token")
+    token = authorization[7:] if authorization.startswith("Bearer ") else authorization
+    try:
+        payload = decode_token(token)
+    except Exception:
+        raise HTTPException(status_code=401, detail="invalid token")
+
+    jti = payload.get("jti")
+    if jti:
+        exp = payload.get("exp", 0)
+        now_ts = int(datetime.now(timezone.utc).timestamp())
+        ttl = max(60, int(exp - now_ts))  # 至少 60s
+        ttl = min(ttl, 30 * 24 * 3600)  # 不超过 30d
+        blacklist_token(jti, ttl)
+    return LogoutOut()
+
+
+# ── POST /auth/refresh ──────────────────────────────────
+@router.post("/refresh", response_model=RefreshOut)
+async def refresh(body: RefreshIn, db: AsyncSession = Depends(get_session)) -> RefreshOut:
+    """refresh token → 新 access + refresh(轮换)。
+
+    黑名单中的 jti 拒绝。
+    """
+    try:
+        payload = decode_token(body.refresh_token)
+    except Exception:
+        raise HTTPException(status_code=401, detail="invalid refresh token")
+
+    if payload.get("type") != "refresh":
+        raise HTTPException(status_code=401, detail="not a refresh token")
+
+    jti = payload.get("jti")
+    if jti and is_blacklisted(jti):
+        raise HTTPException(status_code=401, detail="refresh token revoked")
+
+    try:
+        uid = int(payload["sub"])
+    except (KeyError, ValueError):
+        raise HTTPException(status_code=401, detail="malformed token")
+
+    user = await db.get(User, uid)
+    if user is None:
+        raise HTTPException(status_code=401, detail="user not found")
+
+    # 旧 refresh 也进黑名单(rotation)
+    if jti:
+        exp = payload.get("exp", 0)
+        now_ts = int(datetime.now(timezone.utc).timestamp())
+        ttl = max(60, int(exp - now_ts))
+        blacklist_token(jti, ttl)
+
+    return RefreshOut(
+        access_token=create_access_token(user.id),
+        refresh_token=create_refresh_token(user.id),
+    )
+
+
+# ── GET /auth/me/role(admin 标记) ───────────────────────
+@router.get("/me/role", response_model=dict)
+async def me_role(user: User = Depends(require_user)) -> dict:
+    """返回当前用户角色(便于前端区分 admin UI)。"""
+    return {
+        "id": user.id,
+        "email": user.email,
+        "is_admin": user.is_admin,
+    }

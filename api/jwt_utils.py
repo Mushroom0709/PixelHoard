@@ -15,11 +15,13 @@ def _now() -> datetime:
 
 def create_access_token(user_id: int, extra: Optional[dict[str, Any]] = None) -> str:
     """签发 access token(短期)。"""
+    import secrets
     payload = {
         "sub": str(user_id),
         "type": "access",
         "iat": _now(),
         "exp": _now() + timedelta(minutes=settings.JWT_ACCESS_TTL_MIN),
+        "jti": secrets.token_urlsafe(16),
     }
     if extra:
         payload.update(extra)
@@ -28,11 +30,13 @@ def create_access_token(user_id: int, extra: Optional[dict[str, Any]] = None) ->
 
 def create_refresh_token(user_id: int) -> str:
     """签发 refresh token(长期)。"""
+    import secrets
     payload = {
         "sub": str(user_id),
         "type": "refresh",
         "iat": _now(),
         "exp": _now() + timedelta(days=settings.JWT_REFRESH_TTL_DAYS),
+        "jti": secrets.token_urlsafe(16),
     }
     return jwt.encode(payload, settings.JWT_SECRET, algorithm="HS256")
 

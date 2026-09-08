@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     # DB / Redis
     DATABASE_URL: str = "postgresql://pixelhoard:dev@postgres:5432/pixelhoard"
     REDIS_URL: str = "redis://redis:6379/0"
+    REDIS_PASSWORD: str = ""
 
 
 settings = Settings()
