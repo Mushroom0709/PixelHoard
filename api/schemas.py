@@ -67,6 +67,13 @@ class ShareOut(BaseModel):
     created_at: datetime
     updated_at: datetime
 
+    @classmethod
+    def model_validate(cls, obj, *args, **kwargs):
+        # 处理 None updated_at(老 row 可能)
+        if hasattr(obj, "updated_at") and obj.updated_at is None:
+            obj.updated_at = obj.created_at
+        return super().model_validate(obj, *args, **kwargs)
+
 
 # ── Share Token ─────────────────────────────────────────
 class ShareTokenCreate(BaseModel):
