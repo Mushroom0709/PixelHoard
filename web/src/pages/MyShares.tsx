@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
+import { useAuth } from "../auth";
 
 interface Share {
   id: number;
@@ -10,51 +11,115 @@ interface Share {
 }
 
 export default function MyShares() {
+  const { accessToken, logout } = useAuth();
+  const nav = useNavigate();
   const [shares, setShares] = useState<Share[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [creating, setCreating] = useState(false);
+  const [newTitle, setNewTitle] = useState("");
 
   useEffect(() => {
-    const token = localStorage.getItem("ph_access");
-    if (!token) {
-      setError("未登录");
-      setLoading(false);
+    if (!accessToken) {
+      nav("/login");
       return;
     }
     fetch("/api/shares/me", {
-      headers: { Authorization: `Bearer ${token}` },
+      headers: { Authorization: `Bearer ${accessToken}` },
     })
       .then(async (r) => {
+        if (r.status === 401) {
+          logout();
+          nav("/login");
+          return;
+        }
         if (!r.ok) {
-          if (r.status === 401) {
-            setError("未登录或 token 过期");
-            return;
-          }
           setError(`错误 ${r.status}`);
           return;
         }
-        const list = await r.json();
-        setShares(list);
+        const data = await r.json();
+        setShares(data);
       })
       .catch((e) => setError(String(e)))
       .finally(() => setLoading(false));
-  }, []);
+  }, [accessToken, nav, logout]);
+
+  async function createShare(e: React.FormEvent) {
+    e.preventDefault();
+    if (!newTitle.trim()) return;
+    const r = await fetch("/api/shares", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({ title: newTitle.trim() }),
+    });
+    if (!r.ok) {
+      alert(`创建失败: ${r.status}`);
+      return;
+    }
+    const data = await r.json();
+    setNewTitle("");
+    setCreating(false);
+    nav(`/s/${data.slug}`);
+  }
 
   return (
     <main className="min-h-screen px-6 py-12 max-w-3xl mx-auto">
-      <Link to="/" className="text-sm text-slate-500 hover:text-slate-700">
-        ← 首页
-      </Link>
+      <div className="flex items-center justify-between">
+        <Link to="/" className="text-sm text-slate-500 hover:text-slate-700">
+          ← 首页
+        </Link>
+        <button
+          onClick={() => {
+            logout();
+            nav("/");
+          }}
+          className="text-sm text-slate-500 hover:text-rose-600"
+        >
+          登出
+        </button>
+      </div>
 
       <div className="mt-4 flex items-center justify-between">
         <h1 className="text-3xl font-bold">我的分享</h1>
         <button
-          disabled
-          className="px-4 py-2 rounded-lg bg-brand-500 text-white text-sm opacity-50 cursor-not-allowed"
+          onClick={() => setCreating(true)}
+          className="px-4 py-2 rounded-lg bg-brand-500 text-white text-sm hover:bg-brand-600"
         >
-          + 新建分享(后续)
+          + 新建分享
         </button>
       </div>
+
+      {creating && (
+        <form
+          onSubmit={createShare}
+          className="mt-4 flex gap-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4"
+        >
+          <input
+            type="text"
+            required
+            value={newTitle}
+            onChange={(e) => setNewTitle(e.target.value)}
+            placeholder="分享标题"
+            className="flex-1 px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800"
+          />
+          <button
+            type="submit"
+            className="px-4 py-2 rounded-lg bg-brand-500 text-white text-sm hover:bg-brand-600"
+          >
+            创建
+          </button>
+          <button
+            type="button"
+            onClick={() => setCreating(false)}
+            className="px-3 py-2 text-slate-500 text-sm hover:text-slate-700"
+          >
+            取消
+          </button>
+        </form>
+      )}
 
       {loading && <div className="mt-12 text-slate-500">loading…</div>}
 
@@ -67,9 +132,7 @@ export default function MyShares() {
       {!loading && !error && shares.length === 0 && (
         <div className="mt-12 rounded-xl border border-dashed border-slate-300 dark:border-slate-700 p-8 text-center">
           <div className="text-slate-500">📂</div>
-          <div className="mt-2 text-slate-600 dark:text-slate-400">
-            还没有分享
-          </div>
+          <div className="mt-2 text-slate-600 dark:text-slate-400">还没有分享</div>
           <div className="text-xs text-slate-400 mt-1">点击右上角"新建分享"</div>
         </div>
       )}

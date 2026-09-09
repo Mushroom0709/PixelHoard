@@ -228,3 +228,41 @@ def test_get_share_404(client, mock_db):
 
     resp = client.get("/shares/notexist", headers=_auth())
     assert resp.status_code == 404
+
+# ── ticket #15: 文件列表 ──────────────────────────────
+from api.models import File as _FileModel
+def test_list_files_empty(client, mock_db):
+    """空 share → files=[], total=0"""
+    mock_db.get.return_value = _make_user()
+    fake_result = MagicMock()
+    fake_result.scalar_one_or_none = MagicMock(return_value=_make_share())
+    fake_result.scalars = MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))
+    mock_db.execute = AsyncMock(return_value=fake_result)
+
+    resp = client.get("/shares/aaa11111/files", headers=_auth())
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["files"] == []
+    assert data["total"] == 0
+
+
+def test_list_files_returns_files(client, mock_db):
+    """返回 share 内文件列表。"""
+    mock_db.get.return_value = _make_user()
+    fake_file = _FileModel(
+        id=1, share_id=1, original_filename="test.jpg", obs_key="x",
+        size_bytes=12345, mime_type="image/jpeg", suffix="jpg",
+        sha256="a" * 64, status="ready",
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+    fake_result = MagicMock()
+    fake_result.scalar_one_or_none = MagicMock(return_value=_make_share())
+    fake_result.scalars = MagicMock(return_value=MagicMock(all=MagicMock(return_value=[fake_file])))
+    mock_db.execute = AsyncMock(return_value=fake_result)
+
+    resp = client.get("/shares/aaa11111/files", headers=_auth())
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["total"] == 1
+    assert data["files"][0]["original_filename"] == "test.jpg"

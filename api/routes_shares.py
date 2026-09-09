@@ -178,6 +178,33 @@ async def create_token(
     return ShareTokenOut.model_validate(token)
 
 
+# ── Files list(GET /shares/{slug}/files) ────────────────
+from .models import File as FileModel  # noqa: E402
+from .schemas import FileListOut, FileOut  # noqa: E402
+
+
+@router.get("/{slug}/files", response_model=FileListOut)
+async def list_files(
+    slug: str,
+    user: UserModel = Depends(require_user),
+    db: AsyncSession = Depends(get_session),
+) -> FileListOut:
+    """列出 share 内文件(owner / viewer / editor 都能看)。"""
+    share = await _resolve_share_or_404(slug, user, db)
+
+    stmt = (
+        select(FileModel)
+        .where(FileModel.share_id == share.id)
+        .order_by(FileModel.created_at.desc())
+    )
+    result = await db.execute(stmt)
+    files = result.scalars().all()
+    return FileListOut(
+        files=[FileOut.model_validate(f) for f in files],
+        total=len(files),
+    )
+
+
 @router.get("/{slug}/tokens", response_model=list[ShareTokenOut])
 async def list_tokens(
     slug: str,
