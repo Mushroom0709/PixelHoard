@@ -176,16 +176,17 @@ export default function ShareDetail() {
   const getFileUrl = useCallback(
     async (f: FileItem, kind: string, download = false): Promise<string> => {
       const dl = download ? 1 : 0;
-      // 注意:query 必须以 ? 开头(& 只在拼接多个参数时用)!
+      // 直接拼完整 query——不能用 urlWithMode:它会把 ?token= 追加在已有
+      // query 后面形成第二个 ?,污染最后一个参数(download=1?token=x → 422)
       const path = isGuest
-        ? `/api/guest/files/${f.id}/url?share=${encodeURIComponent(slug)}&kind=${kind}&download=${dl}`
+        ? `/api/guest/files/${f.id}/url?share=${encodeURIComponent(slug)}&token=${encodeURIComponent(guestToken || "")}&kind=${kind}&download=${dl}`
         : `/api/shares/${slug}/files/${f.id}/url?kind=${kind}&download=${dl}`;
-      const r = await fetch(urlWithMode(path), { headers: authHeaders() });
+      const r = await fetch(path, { headers: authHeaders() });
       if (!r.ok) throw new Error(`url ${r.status}`);
       const d = await r.json();
       return d.url as string;
     },
-    [isGuest, slug, memberToken]
+    [isGuest, slug, guestToken, memberToken]
   );
 
   /* 下载(新窗口导航 — OBS 返回 attachment) */
