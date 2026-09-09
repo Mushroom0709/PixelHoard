@@ -162,3 +162,18 @@
 | **D81** | 业务端口 = 10333–10400 |
 | **D82** | 本地 Mac 只开发调试 |
 | **D83** | 容器化 = Docker + Compose(api / web / worker)|
+## 2026-09-09 修复补全轮(无人值守验收后)
+
+| 编号 | 决策 |
+|---|---|
+| **D84** | 上传路由 prefix 从 /s 改 /shares(前端 /api/shares/{slug}/upload-* 经 nginx 去 /api 可达)——原 /s 前缀导致浏览器 init 404 |
+| **D85** | OBS 预签名 Multipart part URL 必须用 queryParams(partNumber/uploadId)+ headers(Content-Type),不能用 specialParam 字符串;SDK 的 specialParam 只接受单一子资源名 |
+| **D86** | OBS completeMultipartUpload 需要 CompleteMultipartUploadRequest(parts=[CompletePart(partNum, etag)]),元素必须对象(转换器 d.partNum 属性访问),键是 partNum 非 partNumber |
+| **D87** | worker OBS 调用修正:putContent 无 contentType 参数(用 PutObjectHeader);getObject 需 loadStreamInMemory=True(body.buffer 才非 None) |
+| **D88** | 文件浏览/下载由签名 GET URL 端点提供(thumb/preview/display/raw 四档 + fallback),不暴露 OBS key;下载带 response-content-disposition=attachment |
+| **D89** | 游客分享链接 /s/{slug}/{token} 由 nginx 全量交给 SPA;游客数据走 /api/guest/*(token query 参数)JSON API——浏览器打开不再是裸 JSON |
+| **D90** | 文件删除端点:DELETE /shares/{slug}/files/{id}(owner/editor;viewer 403)+ DELETE /guest/files/{id}(readwrite token only);DB row + OBS 四档 key 同步删 |
+| **D91** | 任意文件(pdf/zip 等)worker 直接标 ready 不生成衍生档(原会误标 failed);HEIC/HEIF 用 pillow-heif 解码生成 display 兜底档 |
+| **D92** | 管理用户:GET /admin/users + PATCH /admin/users/{id}(仅 admin,不能改自己) |
+| **D93** | 被授权可见:GET /shares/granted(viewer/editor 登录后列出"共享给我的",带 role),前端"我的分享"分区展示 |
+| **D94** | obs-mushroom 桶配 CORS:allowedOrigin=* / methods GET/POST/PUT/DELETE/HEAD / allowedHeader=* / exposeHeader=ETag(SDK 参数名 maxAgeSecond 单数) |

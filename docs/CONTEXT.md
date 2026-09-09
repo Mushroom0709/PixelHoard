@@ -210,3 +210,8 @@
 > - 决策编号列表(D1-D83) → 去 `docs/domain/decision-log.md`
 > - TODO / 待办 / 进度 → 不属于词汇锁
 > - 性能数据 / 技术栈表 → 去 ADR
+## 2026-09-09 补全轮词汇锁增补
+- **文件访问档位(kind)**:raw(原文件)/ thumb(200px)/ preview(800px)/ display(RAW·HEIC 兜底档);均经签名 URL 端点按需签发,不暴露 OBS key
+- **游客 API(/api/guest/***)**:share 视图(share+permission+public_note)、文件列表、文件 URL、文件删除(readwrite token);游客链接页面 = SPA
+- **共享给我的(/shares/granted)**:非 owner 被授权(viewer/editor)的 share 列表入口
+- **管理员(admin)**:用户管理 /admin/users;对全部 share/文件有读+管理权
