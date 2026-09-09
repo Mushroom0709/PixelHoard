@@ -7,11 +7,13 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .db import get_session
+from .config import settings
 from .models import Share
 from .models import User as UserModel
 from .routes_auth import require_user
 from .schemas import ShareCreate, ShareOut
 from .utils import normalize_slug, random_slug
+from .access import get_share_by_slug, require_share_read_access
 
 router = APIRouter(prefix="/shares", tags=["shares"])
 
@@ -180,7 +182,7 @@ async def create_token(
 
 # ── Files list(GET /shares/{slug}/files) ────────────────
 from .models import File as FileModel  # noqa: E402
-from .schemas import FileListOut, FileOut  # noqa: E402
+from .schemas import FileListOut, FileOut, FileUrlOut  # noqa: E402
 
 
 @router.get("/{slug}/files", response_model=FileListOut)
@@ -190,7 +192,9 @@ async def list_files(
     db: AsyncSession = Depends(get_session),
 ) -> FileListOut:
     """列出 share 内文件(owner / viewer / editor 都能看)。"""
-    share = await _resolve_share_or_404(slug, user, db)
+    share = await get_share_by_slug(slug, db)
+    # 权限:owner/admin(role=None)或 granted(viewer/editor)— 都是读权限
+    await require_share_read_access(share, user, db)
 
     stmt = (
         select(FileModel)
@@ -203,6 +207,104 @@ async def list_files(
         files=[FileOut.model_validate(f) for f in files],
         total=len(files),
     )
+
+
+@router.get("/{slug}/files/{file_id}/url", response_model=FileUrlOut)
+async def get_file_url(
+    slug: str,
+    file_id: int,
+    kind: str = "raw",
+    download: bool = False,
+    user: UserModel = Depends(require_user),
+    db: AsyncSession = Depends(get_session),
+) -> FileUrlOut:
+    """登录用户取文件访问 URL(thumb/preview/display/raw)。
+
+    - owner / viewer / editor 均可(读权限)
+    - kind 缺失时后端自动 fallback(见 file_urls.pick_key)
+    """
+    share = await get_share_by_slug(slug, db)
+    await require_share_read_access(share, user, db)
+
+    stmt = select(FileModel).where(
+        FileModel.id == file_id,
+        FileModel.share_id == share.id,
+    )
+    result = await db.execute(stmt)
+    file_row = result.scalar_one_or_none()
+    if file_row is None:
+        raise HTTPException(status_code=404, detail="file not found")
+
+    from .file_urls import sign_file_url
+
+    return FileUrlOut(**sign_file_url(file_row, kind, download=download))
+
+
+async def delete_file_row(file_row: FileModel, user, db: AsyncSession, via: str) -> None:
+    """删除单个文件:DB row + OBS 四档对象(raw/thumb/preview/display)。
+
+    - 同步删 OBS(单文件,失败则抛 500;DB 不删,避免悬空)
+    - 审计 delete_file
+    """
+    from .obs_client import obs
+
+    keys = [
+        file_row.obs_key,
+        file_row.thumb_key,
+        file_row.preview_key,
+        file_row.display_key,
+    ]
+    for k in keys:
+        if not k:
+            continue
+        try:
+            resp = obs.deleteObject(bucketName=settings.OBS_BUCKET, objectKey=k)
+            if resp.status >= 300:
+                print(f"[delete_file] OBS delete {k} status={resp.status}")
+        except Exception as e:
+            print(f"[delete_file] OBS delete {k} failed: {e}")
+
+    file_id = file_row.id
+    share_id = file_row.share_id
+    await db.delete(file_row)
+    await db.commit()
+
+    from .audit import log
+
+    await log(
+        "delete_file",
+        user_id=user.id if user else None,
+        share_id=share_id,
+        target_type="file",
+        target_id=file_id,
+    )
+
+
+@router.delete("/{slug}/files/{file_id}", status_code=204, response_class=Response)
+async def delete_file(
+    slug: str,
+    file_id: int,
+    user: UserModel = Depends(require_user),
+    db: AsyncSession = Depends(get_session),
+) -> Response:
+    """删除 share 内单个文件(owner / editor;viewer → 403)。"""
+    share = await get_share_by_slug(slug, db)
+    role = await require_share_read_access(share, user, db)
+    # 写权限判定:owner/admin(role=None)/editor;viewer 403
+    if role == "viewer":
+        raise HTTPException(status_code=403, detail="readonly: viewer cannot delete files")
+
+    stmt = select(FileModel).where(
+        FileModel.id == file_id,
+        FileModel.share_id == share.id,
+    )
+    result = await db.execute(stmt)
+    file_row = result.scalar_one_or_none()
+    if file_row is None:
+        raise HTTPException(status_code=404, detail="file not found")
+
+    await delete_file_row(file_row, user, db, "login")
+    return Response(status_code=204)
 
 
 @router.get("/{slug}/tokens", response_model=list[ShareTokenOut])

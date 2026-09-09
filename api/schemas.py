@@ -151,6 +151,23 @@ class FileListOut(BaseModel):
 
 
 # ── Upload Init ─────────────────────────────────────────
+class FileUrlOut(BaseModel):
+    """文件访问 URL(签名,短时效)。"""
+
+    url: str
+    kind: str  # 实际生效的 kind(raw/thumb/preview/display)
+    filename: str
+    expires_in: int
+
+
+class GuestShareView(BaseModel):
+    """游客视角 share 视图:share 元数据 + token 权限。"""
+
+    share: ShareOut
+    permission: str  # read / readwrite(token 的权限)
+    token_public_note: Optional[str] = None
+
+
 class UploadInitRequest(BaseModel):
     """POST /shares/{slug}/upload-init body。"""
 

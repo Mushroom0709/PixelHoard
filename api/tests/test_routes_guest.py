@@ -9,7 +9,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from api.models import Share, ShareToken
-from api.routes_guest import router as guest_router
+from api.routes_guest import router as guest_router, legacy_router as guest_legacy_router
 
 
 def _make_share(slug: str = "aaa11111") -> Share:
@@ -52,6 +52,7 @@ def app(mock_db):
     from api.db import get_session
     app = FastAPI()
     app.include_router(guest_router)
+    app.include_router(guest_legacy_router)
     async def _override():
         yield mock_db
     app.dependency_overrides[get_session] = _override

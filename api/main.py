@@ -10,7 +10,7 @@ from .obs_client import obs
 from .db import engine
 from .routes_auth import router as auth_router
 from .routes_shares import router as shares_router
-from .routes_guest import router as guest_router
+from .routes_guest import router as guest_router, legacy_router as guest_legacy_router
 from .routes_grants import router as grants_router
 from .routes_upload import router as upload_router
 from .routes_delete import router as delete_router
@@ -50,6 +50,7 @@ app.add_middleware(
 app.include_router(auth_router)
 app.include_router(shares_router)
 app.include_router(guest_router)
+app.include_router(guest_legacy_router)
 app.include_router(grants_router)
 app.include_router(upload_router)
 app.include_router(delete_router)
@@ -79,11 +80,13 @@ async def obs_ping() -> dict:
     try:
         # 简单列出 bucket 前 1 个对象作为连通性证明
         resp = obs.listObjects(bucketName=settings.OBS_BUCKET, max_keys=1)
+        body = getattr(resp, "body", None) or {}
+        contents = body.get("contents", []) if hasattr(body, "get") else []
         return {
             "ok": True,
             "bucket": settings.OBS_BUCKET,
             "endpoint": settings.OBS_ENDPOINT,
-            "objects_count": len(resp.get("contents", [])),
+            "objects_count": len(contents),
         }
     except Exception as e:
         return {"ok": False, "error": str(e)}

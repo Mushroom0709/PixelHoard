@@ -214,18 +214,21 @@ async def upload_complete(
     if meta["share_id"] != share.id:
         raise HTTPException(status_code=400, detail="share mismatch")
 
-    # 调 OBS complete
-    parts = [
-        {"partNumber": p.part_number, "etag": p.etag}
-        for p in body.parts
-    ]
+    # 调 OBS complete — SDK 需要 CompleteMultipartUploadRequest 包装,
+    # parts 元素必须是 CompletePart 对象(转换器用 d.partNum 属性访问)
+    from obs import CompleteMultipartUploadRequest, CompletePart
 
     try:
         resp = obs.completeMultipartUpload(
             bucketName=settings.OBS_BUCKET,
             objectKey=meta["obs_key"],
             uploadId=meta["obs_upload_id"],
-            parts=parts,
+            completeMultipartUploadRequest=CompleteMultipartUploadRequest(
+                parts=[
+                    CompletePart(partNum=p.part_number, etag=p.etag)
+                    for p in body.parts
+                ]
+            ),
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"OBS complete failed: {e}")

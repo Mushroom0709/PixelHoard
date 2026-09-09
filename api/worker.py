@@ -25,12 +25,14 @@ from .models import File
 logger = logging.getLogger("pixelhoard.worker")
 logging.basicConfig(level=logging.INFO)
 
-NATIVE_FORMATS = {"jpg", "jpeg", "png", "webp", "gif", "avif", "heic", "heif"}
+NATIVE_FORMATS = {"jpg", "jpeg", "png", "webp", "gif", "avif"}
 THUMB_WIDTH = 200
 PREVIEW_WIDTH = 800
 JPEG_QUALITY = 85
 VIDEO_FORMATS = {"mp4", "mov", "webm", "mkv", "avi", "m4v", "hevc"}
 RAW_FORMATS = {"arw", "cr2", "cr3", "nef", "dng", "rw2", "orf", "raf"}
+# HEIC/HEIF — 浏览器(除 iOS)不能原生显示,需要 display 兜底档
+HEIC_FORMATS = {"heic", "heif"}
 
 
 def _get_obs():
@@ -42,7 +44,12 @@ def _get_obs():
 def _download_obs(obs_key_str: str) -> bytes:
     """下载 OBS 对象内容。"""
     obs = _get_obs()
-    resp = obs.getObject(bucketName=settings.OBS_BUCKET, objectKey=obs_key_str)
+    # 必须 loadStreamInMemory=True — 否则 body.buffer 是 None(stream 模式)!
+    resp = obs.getObject(
+        bucketName=settings.OBS_BUCKET,
+        objectKey=obs_key_str,
+        loadStreamInMemory=True,
+    )
     if resp.status >= 300:
         raise RuntimeError(f"OBS getObject failed: {resp.errorCode}")
     return resp.body.buffer
@@ -51,11 +58,15 @@ def _download_obs(obs_key_str: str) -> bytes:
 def _upload_obs(obs_key_str: str, data: bytes, content_type: str = "image/jpeg") -> None:
     """上传 bytes 到 OBS。"""
     obs = _get_obs()
+    from obs import PutObjectHeader
+
+    # 注意:putContent 没有 contentType 关键字参数,
+    # content-type 必须走 PutObjectHeader(headers)!
     resp = obs.putContent(
         bucketName=settings.OBS_BUCKET,
         objectKey=obs_key_str,
         content=data,
-        contentType=content_type,
+        headers=PutObjectHeader(contentType=content_type),
     )
     if resp.status >= 300:
         raise RuntimeError(f"OBS putContent failed: {resp.errorCode}")
@@ -83,7 +94,14 @@ async def _process_file(file_id: int) -> None:
         if _is_raw(suffix):
             await _process_arw_file(file_id, share_id, obs_raw_key)
             return
-        await _process_image(file_id, share_id, obs_raw_key)
+        if _is_heic(suffix):
+            await _process_heic_file(file_id, share_id, obs_raw_key)
+            return
+        if _is_image(suffix):
+            await _process_image(file_id, share_id, obs_raw_key)
+            return
+        # 其他任意文件(文档/压缩包等)— 无需衍生档,直接 ready
+        await _mark_ready_plain(file_id)
     except Exception as e:
         logger.error(f"process failed for file {file_id}: {e}")
         await _mark_failed(file_id, str(e))
@@ -212,8 +230,77 @@ def _is_video(suffix: str) -> bool:
     return suffix.lower() in VIDEO_FORMATS
 
 
+def _is_image(suffix: str) -> bool:
+    return suffix.lower() in NATIVE_FORMATS or suffix.lower() in RAW_FORMATS
+
+
 def _is_raw(suffix: str) -> bool:
     return suffix.lower() in RAW_FORMATS
+
+
+async def _mark_ready_plain(file_id: int) -> None:
+    """非媒体文件:直接 ready,无衍生档。"""
+    async with async_session() as db:
+        await db.execute(
+            update(File)
+            .where(File.id == file_id)
+            .values(status="ready")
+        )
+        await db.commit()
+    logger.info(f"plain file {file_id} ready (no derivates)")
+
+
+def _is_heic(suffix: str) -> bool:
+    return suffix.lower() in HEIC_FORMATS
+
+
+def _decode_heic_to_jpeg(raw_bytes: bytes) -> tuple[bytes, int, int]:
+    """HEIC/HEIF 解码 → preview JPEG。需要 pillow-heif。"""
+    import io
+
+    import pillow_heif
+    from PIL import Image
+
+    pillow_heif.register_heif_opener()
+    img = Image.open(io.BytesIO(raw_bytes))
+    img.load()  # 解码,坏文件抛
+    return _resize_to_jpeg(img, PREVIEW_WIDTH), img.width, img.height
+
+
+async def _process_heic_file(file_id: int, share_id: int, obs_raw_key: str) -> None:
+    """处理 HEIC/HEIF:解码 + thumb/preview/display 三档。"""
+    raw = await asyncio.to_thread(_download_obs, obs_raw_key)
+    display_jpeg, w, h = await asyncio.to_thread(_decode_heic_to_jpeg, raw)
+
+    from PIL import Image
+    import io
+
+    img = Image.open(io.BytesIO(display_jpeg))
+    thumb_jpeg = await asyncio.to_thread(_resize_to_jpeg, img, THUMB_WIDTH)
+
+    thumb_key = obs_key_path(share_id, "thumb", f"{file_id}.jpg")
+    preview_key = obs_key_path(share_id, "preview", f"{file_id}.jpg")
+    display_key = obs_key_path(share_id, "display", f"{file_id}.jpg")
+    await asyncio.to_thread(_upload_obs, thumb_key, thumb_jpeg, "image/jpeg")
+    await asyncio.to_thread(_upload_obs, preview_key, display_jpeg, "image/jpeg")
+    await asyncio.to_thread(_upload_obs, display_key, display_jpeg, "image/jpeg")
+
+    async with async_session() as db:
+        await db.execute(
+            update(File)
+            .where(File.id == file_id)
+            .values(
+                status="ready",
+                thumb_key=thumb_key,
+                preview_key=preview_key,
+                display_key=display_key,
+                width=w,
+                height=h,
+                has_exif=True,
+            )
+        )
+        await db.commit()
+    logger.info(f"heic file {file_id} ready")
 
 
 def _process_arw(raw_bytes: bytes) -> tuple[bytes, int, int]:

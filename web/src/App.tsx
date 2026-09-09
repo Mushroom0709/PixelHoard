@@ -17,6 +17,8 @@ export default function App() {
         <Route path="/health" element={<Health />} />
         <Route path="/shares" element={<MyShares />} />
         <Route path="/s/:slug" element={<ShareDetail />} />
+        {/* 游客分享链接:/s/{slug}/{tokenCode} */}
+        <Route path="/s/:slug/:tokenCode" element={<ShareDetail />} />
       </Routes>
     </AuthProvider>
   );
