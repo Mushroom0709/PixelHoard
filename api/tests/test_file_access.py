@@ -75,6 +75,7 @@ class _DB:
             if isinstance(first, list):
                 r.scalars = MagicMock(return_value=MagicMock(all=MagicMock(return_value=first)))
                 r.scalar_one_or_none = MagicMock(return_value=first[0] if first else None)
+                r.all = MagicMock(return_value=first)
             else:
                 r.scalar_one_or_none = MagicMock(return_value=first)
                 r.scalars = MagicMock(return_value=MagicMock(all=MagicMock(return_value=first if isinstance(first, list) else [])))
@@ -194,6 +195,20 @@ def test_member_delete_file_viewer_forbidden(client, db):
     db.push(grant)
     r = client.delete("/shares/ab12cd34/files/5", headers=_auth_header())
     assert r.status_code == 403, r.text
+
+
+def test_granted_shares_lists_shared(client, db):
+    """GET /shares/granted 返回被授权的 share(带 role)。"""
+    db.set_user(_user(1))
+    # select(Share, UserGrant.role) → result.all() 行
+    share = _share(owner_id=99)
+    db.push([(share, "editor")])
+    r = client.get("/shares/granted", headers=_auth_header())
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert len(d) == 1
+    assert d[0]["slug"] == "ab12cd34"
+    assert d[0]["role"] == "editor"
 
 
 def test_guest_delete_file_readonly_forbidden(client, db):

@@ -71,6 +71,40 @@ async def list_my_shares(
     return [ShareOut.model_validate(s) for s in shares]
 
 
+# ── GET /shares/granted ────────────────────────────────
+@router.get("/granted", response_model=list[ShareOut])
+async def list_granted_shares(
+    user: UserModel = Depends(require_user),
+    db: AsyncSession = Depends(get_session),
+) -> list[ShareOut]:
+    """列出我被授权(非 owner)的 share — viewer/editor 入口。"""
+    from .models import UserGrant
+
+    result = await db.execute(
+        select(Share, UserGrant.role)
+        .join(UserGrant, UserGrant.share_id == Share.id)
+        .where(UserGrant.user_id == user.id)
+        .where(Share.is_deleted == False)  # noqa: E712
+        .order_by(UserGrant.created_at.desc())
+    )
+    rows = result.all()
+    out = []
+    for share, role in rows:
+        item = ShareOut.model_validate({
+            "id": share.id,
+            "owner_id": share.owner_id,
+            "slug": share.slug,
+            "title": share.title,
+            "description": share.description,
+            "is_deleted": share.is_deleted,
+            "created_at": share.created_at,
+            "updated_at": share.updated_at,
+            "role": role,
+        })
+        out.append(item)
+    return out
+
+
 # ── GET /shares/{slug} ──────────────────────────────────
 @router.get("/{slug}", response_model=ShareOut)
 async def get_share(

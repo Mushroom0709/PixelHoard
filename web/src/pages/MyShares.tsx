@@ -8,12 +8,14 @@ interface Share {
   title: string;
   description: string | null;
   created_at: string;
+  role?: string | null;
 }
 
 export default function MyShares() {
   const { accessToken, logout } = useAuth();
   const nav = useNavigate();
   const [shares, setShares] = useState<Share[]>([]);
+  const [granted, setGranted] = useState<Share[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
@@ -42,6 +44,14 @@ export default function MyShares() {
       })
       .catch((e) => setError(String(e)))
       .finally(() => setLoading(false));
+
+    // 共享给我的(viewer/editor)
+    fetch("/api/shares/granted", {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    })
+      .then((r) => (r.ok ? r.json() : []))
+      .then(setGranted)
+      .catch(() => setGranted([]));
   }, [accessToken, nav, logout]);
 
   async function createShare(e: React.FormEvent) {
@@ -129,7 +139,7 @@ export default function MyShares() {
         </div>
       )}
 
-      {!loading && !error && shares.length === 0 && (
+      {!loading && !error && shares.length === 0 && granted.length === 0 && (
         <div className="mt-12 rounded-xl border border-dashed border-slate-300 dark:border-slate-700 p-8 text-center">
           <div className="text-slate-500">📂</div>
           <div className="mt-2 text-slate-600 dark:text-slate-400">还没有分享</div>
@@ -159,6 +169,44 @@ export default function MyShares() {
             </li>
           ))}
         </ul>
+      )}
+
+      {!loading && granted.length > 0 && (
+        <>
+          <h2 className="mt-10 text-lg font-medium">共享给我的({granted.length})</h2>
+          <ul className="mt-3 space-y-3">
+            {granted.map((s) => (
+              <li key={s.id}>
+                <Link
+                  to={`/s/${s.slug}`}
+                  className="block rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 hover:border-brand-500 transition"
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium">{s.title}</span>
+                    <span
+                      className={
+                        s.role === "editor"
+                          ? "px-2 py-0.5 rounded text-xs bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300"
+                          : "px-2 py-0.5 rounded text-xs bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300"
+                      }
+                    >
+                      {s.role === "editor" ? "可编辑" : "只读"}
+                    </span>
+                  </div>
+                  {s.description && (
+                    <div className="mt-1 text-sm text-slate-500 line-clamp-1">
+                      {s.description}
+                    </div>
+                  )}
+                  <div className="mt-2 text-xs text-slate-400 font-mono">
+                    /s/{s.slug} ·{" "}
+                    {new Date(s.created_at).toLocaleDateString("zh-CN")}
+                  </div>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </>
       )}
     </main>
   );

@@ -14,6 +14,7 @@ from .routes_guest import router as guest_router, legacy_router as guest_legacy_
 from .routes_grants import router as grants_router
 from .routes_upload import router as upload_router
 from .routes_delete import router as delete_router
+from .routes_admin import router as admin_router
 
 
 @asynccontextmanager
@@ -54,6 +55,7 @@ app.include_router(guest_legacy_router)
 app.include_router(grants_router)
 app.include_router(upload_router)
 app.include_router(delete_router)
+app.include_router(admin_router)
 
 
 @app.get("/health")
