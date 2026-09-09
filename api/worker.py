@@ -340,7 +340,6 @@ def _probe_video(obs_key_str: str) -> dict:
                 "ffprobe", "-v", "error",
                 "-show_entries",
                 "stream=width,height,codec_name,codec_type:format=duration:format_tags=major_brand",
-                "-show_data", "off",
                 "-print_format", "json",
                 "-i", tmp_path,
             ],
