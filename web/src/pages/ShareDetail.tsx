@@ -271,7 +271,13 @@ export default function ShareDetail() {
       const start = i * partSize;
       const end = Math.min(start + partSize, file.size);
       const blob = file.slice(start, end);
-      const putRes = await fetch(urls[i], { method: "PUT", body: blob });
+      // PUT 必须显式带 Content-Type 头 —— 与后端签名 headers 一致,
+      // 否则 blob.type 为空时浏览器不加头 → OBS SignatureDoesNotMatch
+      const putRes = await fetch(urls[i], {
+        method: "PUT",
+        headers: { "Content-Type": file.type || "application/octet-stream" },
+        body: blob,
+      });
       if (!putRes.ok) throw new Error(`part ${i + 1} put ${putRes.status}`);
       const etag = putRes.headers.get("ETag")?.replace(/"/g, "") || "";
       parts.push({ part_number: i + 1, etag, size: end - start });

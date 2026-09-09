@@ -140,12 +140,22 @@ async def upload_init(
     expires_in = 3600  # 1h
     for part_num in range(1, int(n_parts) + 1):
         try:
+            # 注意:specialParam 只接受单个子资源名(如 "uploadId"),
+            # partNumber + uploadId 必须走 queryParams!
+            # 且 PUT 请求会带 Content-Type 头(fetch blob / curl),
+            # 签名必须包含 content-type 否则 SignatureDoesNotMatch。
             url_resp = obs.createSignedUrl(
                 method="PUT",
                 bucketName=settings.OBS_BUCKET,
                 objectKey=object_key,
                 expires=expires_in,
-                specialParam=f"partNumber={part_num}&uploadId={obs_upload_id}",
+                queryParams={
+                    "partNumber": part_num,
+                    "uploadId": obs_upload_id,
+                },
+                headers={
+                    "Content-Type": body.mime_type or "application/octet-stream",
+                },
             )
             part_urls.append(url_resp.signedUrl)
         except Exception as e:
