@@ -22,7 +22,9 @@ from .schemas import (
     UploadInitResponse,
 )
 
-router = APIRouter(prefix="/s", tags=["upload"])
+# 注意:前端走 /api/shares/{slug}/upload-*,nginx 把 /api/ 前缀去掉转发给 api
+# 所以这里 prefix 用 /shares,而不是 /s
+router = APIRouter(prefix="/shares", tags=["upload"])
 
 PART_SIZE = 5 * 1024 * 1024  # 5MB
 UPLOAD_META_TTL = 3600 * 6  # 6h — 比预签名 URL 长
@@ -168,7 +170,7 @@ async def upload_init(
         upload_id=upload_id,
         part_urls=part_urls,
         part_size=PART_SIZE,
-        complete_url=f"/api/s/{slug}/upload-complete",
+        complete_url=f"/api/shares/{slug}/upload-complete",
         expires_in=expires_in,
     )
 
