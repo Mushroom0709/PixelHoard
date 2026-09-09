@@ -17,30 +17,31 @@ depends_on = None
 
 
 def upgrade() -> None:
-    """如果 users 表为空,seed 一个 admin 用户。"""
+    """始终保证 admin 账号存在(upsert)。"""
     conn = op.get_bind()
 
-    count = conn.execute(sa.text("SELECT count(*) FROM users")).scalar() or 0
-    if count > 0:
-        # 已有用户,不重复 seed
-        return
-
-    # 从 env 读,缺省值(生产 .env 必填)
-    admin_email = os.environ.get("ADMIN_EMAIL", "admin@pixelhoard.local").lower().strip()
+    # 从 env 读,缺省值
+    admin_email = os.environ.get("ADMIN_EMAIL", "admin@pixelhoard.com").lower().strip()
     admin_password = os.environ.get("ADMIN_PASSWORD", "admin123!change-me")
     admin_display = os.environ.get("ADMIN_DISPLAY_NAME", "PixelHoard Admin")
 
-    # bcrypt hash(同步,本机用)
+    # bcrypt hash
     import bcrypt
 
     salt = bcrypt.gensalt(rounds=12)
     hashed = bcrypt.hashpw(admin_password.encode("utf-8"), salt).decode("utf-8")
 
+    # upsert: 如果 admin_email 不存在 → INSERT;存在 → 设为 admin + 重置密码
     conn.execute(
         sa.text(
             """
             INSERT INTO users (email, password_hash, display_name, is_admin, is_verified, created_at)
             VALUES (:email, :hash, :display, true, true, NOW())
+            ON CONFLICT (email) DO UPDATE SET
+                password_hash = EXCLUDED.password_hash,
+                is_admin = true,
+                is_verified = true,
+                display_name = EXCLUDED.display_name
             """
         ),
         {
@@ -52,9 +53,9 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    """降级 = 删 admin 用户。"""
+    """降级 = 把 admin 降级为普通用户(保留账号)。"""
     conn = op.get_bind()
     conn.execute(
-        sa.text("DELETE FROM users WHERE email = :email AND is_admin = true"),
-        {"email": os.environ.get("ADMIN_EMAIL", "admin@pixelhoard.local").lower().strip()},
+        sa.text("UPDATE users SET is_admin = false WHERE email = :email"),
+        {"email": os.environ.get("ADMIN_EMAIL", "admin@pixelhoard.com").lower().strip()},
     )
