@@ -111,14 +111,21 @@ async def _process_video(file_id: int, share_id: int, obs_raw_key: str) -> None:
     """处理视频:ffprobe + 抽帧 + 写 width/height/duration/codec/moov_at_head。"""
     info = await asyncio.to_thread(_probe_video, obs_raw_key)
 
-    # 抽 thumb(第一帧)
-    thumb_jpeg, w, h, dur = await asyncio.to_thread(_generate_thumb_from_video, obs_raw_key)
+    # 抽第一帧(原尺寸 JPEG)
+    frame_jpeg, w, h, dur = await asyncio.to_thread(_generate_thumb_from_video, obs_raw_key)
 
-    # 简化:thumb + preview 用同一张图(节省成本)
+    # 生成真正的 thumb(200) + preview(800),避免 4K 帧原尺寸存两份
+    import io as _io
+    from PIL import Image as _PIL
+
+    _img = _PIL.open(_io.BytesIO(frame_jpeg))
+    thumb_jpeg = await asyncio.to_thread(_resize_to_jpeg, _img, THUMB_WIDTH)
+    preview_jpeg = await asyncio.to_thread(_resize_to_jpeg, _img, PREVIEW_WIDTH)
+
     thumb_key = obs_key_path(share_id, "thumb", f"{file_id}.jpg")
     preview_key = obs_key_path(share_id, "preview", f"{file_id}.jpg")
     await asyncio.to_thread(_upload_obs, thumb_key, thumb_jpeg, "image/jpeg")
-    await asyncio.to_thread(_upload_obs, preview_key, thumb_jpeg, "image/jpeg")
+    await asyncio.to_thread(_upload_obs, preview_key, preview_jpeg, "image/jpeg")
 
     async with async_session() as db:
         await db.execute(
