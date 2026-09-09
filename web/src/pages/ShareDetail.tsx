@@ -189,15 +189,27 @@ export default function ShareDetail() {
     [isGuest, slug, guestToken, memberToken]
   );
 
-  /* 下载(新窗口导航 — OBS 返回 attachment) */
+  /* 下载 — iOS Safari 兼容 */
   const downloadFile = useCallback(
     async (f: FileItem) => {
+      let url: string;
       try {
-        const url = await getFileUrl(f, "raw", true);
-        window.open(url, "_blank");
+        url = await getFileUrl(f, "raw", true);
       } catch (e) {
         window.alert(`获取下载链接失败: ${e instanceof Error ? e.message : e}`);
+        return;
       }
+      // window.open 在 iOS Safari 会被弹窗拦截(异步回调无手势上下文)。
+      // 用临时 <a> 触发导航:OBS 返回 Content-Disposition: attachment,
+      // Safari/Chrome 均按下载处理(跨域时 download 属性被忽略,靠响应头)。
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = f.original_filename || "download";
+      a.rel = "noopener";
+      a.style.display = "none";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
     },
     [getFileUrl]
   );
