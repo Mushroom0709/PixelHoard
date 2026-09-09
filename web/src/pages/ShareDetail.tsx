@@ -175,10 +175,11 @@ export default function ShareDetail() {
   /* 文件访问 URL(单次获取) */
   const getFileUrl = useCallback(
     async (f: FileItem, kind: string, download = false): Promise<string> => {
-      const q = `&kind=${kind}&download=${download ? 1 : 0}`;
+      const dl = download ? 1 : 0;
+      // 注意:query 必须以 ? 开头(& 只在拼接多个参数时用)!
       const path = isGuest
-        ? `/api/guest/files/${f.id}/url?share=${encodeURIComponent(slug)}${q}`
-        : `/api/shares/${slug}/files/${f.id}/url${q}`;
+        ? `/api/guest/files/${f.id}/url?share=${encodeURIComponent(slug)}&kind=${kind}&download=${dl}`
+        : `/api/shares/${slug}/files/${f.id}/url?kind=${kind}&download=${dl}`;
       const r = await fetch(urlWithMode(path), { headers: authHeaders() });
       if (!r.ok) throw new Error(`url ${r.status}`);
       const d = await r.json();
