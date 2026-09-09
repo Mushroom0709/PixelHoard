@@ -186,21 +186,65 @@ export default function ShareDetail() {
     }
   }
 
-  async function uploadFiles(fileList: FileList | null) {
+  // 批量上传 — 并发 3 个(避免 OBS API 限流),显示进度
+  const [uploads, setUploads] = useState<Map<string, {name: string; progress: number; status: "pending"|"uploading"|"done"|"error"; error?: string}>>(new Map());
+
+  async function uploadFiles(fileList: FileList | File[] | null) {
     if (!fileList || fileList.length === 0 || !share) return;
-    for (const f of Array.from(fileList)) {
-      try {
-        await uploadOne(f);
-      } catch (e) {
-        console.error(e);
-        window.alert(
-          `上传失败: ${f.name} — ${e instanceof Error ? e.message : "unknown"}`
-        );
+    const files = Array.from(fileList);
+    // 初始化进度 entries
+    setUploads((prev) => {
+      const next = new Map(prev);
+      files.forEach((f) => {
+        if (!next.has(f.name + f.size)) {
+          next.set(f.name + f.size, { name: f.name, progress: 0, status: "pending" });
+        }
+      });
+      return next;
+    });
+
+    // 并发 3 个
+    const CONCURRENCY = 3;
+    let cursor = 0;
+    const errors: string[] = [];
+    const worker = async () => {
+      while (cursor < files.length) {
+        const f = files[cursor++];
+        const key = f.name + f.size;
+        try {
+          setUploads((prev) => new Map(prev).set(key, { name: f.name, progress: 5, status: "uploading" }));
+          await uploadOne(f, (p) => {
+            setUploads((prev) => new Map(prev).set(key, { name: f.name, progress: p, status: "uploading" }));
+          });
+          setUploads((prev) => new Map(prev).set(key, { name: f.name, progress: 100, status: "done" }));
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : "unknown";
+          console.error(e);
+          setUploads((prev) => new Map(prev).set(key, { name: f.name, progress: 0, status: "error", error: msg }));
+          errors.push(`${f.name}: ${msg}`);
+        }
       }
+    };
+    const workers = Array(Math.min(CONCURRENCY, files.length)).fill(0).map(() => worker());
+    await Promise.all(workers);
+
+    if (errors.length > 0) {
+      window.alert(`${errors.length}/${files.length} 个文件上传失败:\n\n${errors.slice(0, 3).join("\n")}${errors.length > 3 ? `\n... 还有 ${errors.length - 3} 个` : ""}`);
     }
+    // 3 秒后清理完成的项
+    setTimeout(() => {
+      setUploads((prev) => {
+        const next = new Map();
+        prev.forEach((v, k) => {
+          if (v.status === "uploading" || v.status === "pending") next.set(k, v);
+        });
+        return next;
+      });
+    }, 3000);
   }
 
-  async function uploadOne(file: File): Promise<void> {
+  async function uploadOne(file: File, onProgress?: (pct: number) => void): Promise<void> {
+    onProgress?.(5);
     // 1. init
     const initRes = await fetch(`/api/shares/${slug}/upload-init`, {
       method: "POST",
@@ -231,9 +275,13 @@ export default function ShareDetail() {
       if (!putRes.ok) throw new Error(`part ${i + 1} put ${putRes.status}`);
       const etag = putRes.headers.get("ETag")?.replace(/"/g, "") || "";
       parts.push({ part_number: i + 1, etag, size: end - start });
+      // 进度:5% init + 80% 分片 + 15% complete
+      const uploadPct = 5 + Math.round((i + 1) / urls.length * 80);
+      onProgress?.(uploadPct);
     }
 
     // 3. complete
+    onProgress?.(90);
     const completeRes = await fetch(`/api/shares/${slug}/upload-complete`, {
       method: "POST",
       headers: {
@@ -347,18 +395,60 @@ export default function ShareDetail() {
           {/* 上传 */}
           <section className="mt-8">
             <h2 className="text-lg font-medium mb-3">上传文件</h2>
-            <label className="block rounded-xl border-2 border-dashed border-slate-300 dark:border-slate-700 p-8 text-center cursor-pointer hover:border-brand-500 transition">
-              <div className="text-slate-500">📤 点击或拖入文件</div>
+            <label
+              className="block rounded-xl border-2 border-dashed border-slate-300 dark:border-slate-700 p-8 text-center cursor-pointer hover:border-brand-500 transition"
+              onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
+              onDrop={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const files = Array.from(e.dataTransfer.files);
+                if (files.length > 0) uploadFiles(files);
+              }}
+            >
+              <div className="text-slate-500">📤 点击或拖入文件(支持批量多选)</div>
               <div className="text-xs text-slate-400 mt-1">
-                直传 OBS · 浏览器分片 · 大文件支持
+                直传 OBS · 浏览器分片 · 大文件支持 · 3 个并发
               </div>
               <input
                 type="file"
                 multiple
                 className="hidden"
-                onChange={(e) => uploadFiles(e.target.files)}
+                onChange={(e) => {
+                  if (e.target.files) uploadFiles(e.target.files);
+                  e.target.value = "";  // 允许重复选同一文件
+                }}
               />
             </label>
+
+            {/* 批量上传进度 */}
+            {uploads.size > 0 && (
+              <ul className="mt-3 space-y-1.5">
+                {Array.from(uploads.entries()).map(([key, u]) => (
+                  <li
+                    key={key}
+                    className="flex items-center gap-3 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-2.5 text-sm"
+                  >
+                    <div className="flex-1 truncate">
+                      <div className="flex items-center gap-2">
+                        <span className="truncate font-medium">{u.name}</span>
+                        {u.status === "done" && <span className="text-emerald-600 text-xs">✓ 完成</span>}
+                        {u.status === "error" && <span className="text-rose-600 text-xs">✗ {u.error}</span>}
+                        {u.status === "uploading" && <span className="text-slate-500 text-xs">{u.progress}%</span>}
+                        {u.status === "pending" && <span className="text-slate-400 text-xs">等待</span>}
+                      </div>
+                      {u.status === "uploading" && (
+                        <div className="mt-1 h-1 bg-slate-100 dark:bg-slate-800 rounded overflow-hidden">
+                          <div
+                            className="h-full bg-brand-500 transition-all"
+                            style={{ width: `${u.progress}%` }}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
           </section>
 
           {/* Token 管理 */}
