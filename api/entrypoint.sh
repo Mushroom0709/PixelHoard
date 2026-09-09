@@ -11,5 +11,5 @@ cd /app
 alembic upgrade head
 echo "[entrypoint] alembic done"
 
-# 把 CMD 参数透传给 uvicorn(默认 ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"])
+# 把 CMD 参数透传给 uvicorn(默认 ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"])
 exec "$@"

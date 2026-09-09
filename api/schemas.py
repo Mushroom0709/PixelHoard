@@ -94,6 +94,7 @@ class ShareTokenOut(BaseModel):
 
     id: int
     share_id: int
+    token_code: str  # owner 必须看到,才能复制分享
     permission: str
     label: Optional[str] = None
     public_note: Optional[str] = None

@@ -1,0 +1,13 @@
+# .dockerignore — 让 docker build 上下文小,build 快
+node_modules/
+web/dist/
+.git/
+.scratch/
+*.md
+!docs/deploy-runbook.md
+.DS_Store
+*.log
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/

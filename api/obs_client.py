@@ -1,7 +1,7 @@
 """OBS 客户端单例。"""
 from obs import ObsClient
 
-from config import settings
+from .config import settings
 
 
 def _build_client() -> ObsClient:

@@ -1,4 +1,5 @@
-name: pixelhoard-api
+version: "3.9"
+name: pixelhoard
 services:
   postgres:
     image: postgres:16-alpine
@@ -15,7 +16,6 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
-    # 不对外暴露端口 — 走容器网络
     networks:
       - pixelhoard-net
 
@@ -35,9 +35,12 @@ services:
       - pixelhoard-net
 
   api:
+    # 从项目根目录构建(需要 alembic.ini + alembic/ 在 /app 下)
     build:
-      context: ./api
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: api/Dockerfile
+      args:
+        BUILDKIT_INLINE_CACHE: "1"
     container_name: pixelhoard-api
     restart: unless-stopped
     environment:
@@ -62,12 +65,12 @@ services:
 
   worker:
     build:
-      context: ./api
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: api/Dockerfile
     container_name: pixelhoard-worker
     restart: unless-stopped
     # worker 不需要 alembic(已跑过),只跑 worker 主循环
-    command: ["python", "-m", "worker"]
+    command: ["python", "-m", "api.worker"]
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-pixelhoard}:${POSTGRES_PASSWORD:-pixelhoard-dev-pass}@postgres:5432/${POSTGRES_DB:-pixelhoard}
       REDIS_URL: redis://redis:6379/0
@@ -88,7 +91,7 @@ services:
 
   web:
     build:
-      context: ./web
+      context: web
       dockerfile: Dockerfile
       args:
         VITE_API_BASE: /api
@@ -108,8 +111,10 @@ services:
     volumes:
       - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on:
-      - api
-      - web
+      api:
+        condition: service_started
+      web:
+        condition: service_started
     networks:
       - pixelhoard-net
 

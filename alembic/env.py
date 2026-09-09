@@ -46,8 +46,12 @@ def do_run_migrations(connection: Connection) -> None:
 
 async def run_async_migrations() -> None:
     """异步模式 — 直连 DB。"""
+    url = config.get_main_option("sqlalchemy.url")
+    # 强制 async driver(避免 sqlalchemy 默认选 psycopg2)
+    if url and url.startswith("postgresql://"):
+        url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
     connectable = async_engine_from_config(
-        config.get_section(config.config_ini_section, {}),
+        config.get_section(config.config_ini_section, {}) | {"sqlalchemy.url": url},
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
     )
